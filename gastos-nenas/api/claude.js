@@ -7,11 +7,16 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
   try {
-    // Vercel a veces necesita parsear el body manualmente
     let body = req.body;
     if (typeof body === "string") {
-      try { body = JSON.parse(body); } catch {}
+      try { body = JSON.parse(body); } catch (e) {
+        return res.status(400).json({ error: "Body parse error", detail: e.message });
+      }
     }
+
+    // Log para debug
+    console.log("Body recibido:", JSON.stringify(body).slice(0, 200));
+    console.log("API Key presente:", !!process.env.ANTHROPIC_API_KEY);
 
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -24,9 +29,14 @@ export default async function handler(req, res) {
     });
 
     const data = await response.json();
-    return res.status(200).json(data);
+
+    // Log respuesta
+    console.log("Anthropic status:", response.status);
+    console.log("Anthropic response:", JSON.stringify(data).slice(0, 200));
+
+    return res.status(response.status).json(data);
   } catch (error) {
-    console.error("Claude API error:", error);
-    return res.status(500).json({ error: error.message || "Error al conectar con Claude" });
+    console.error("Error:", error.message);
+    return res.status(500).json({ error: error.message });
   }
 }
