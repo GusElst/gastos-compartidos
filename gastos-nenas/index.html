@@ -504,7 +504,7 @@ function App() {
               {NENAS.map(n=>(
                 <button key={n} onClick={()=>setFilterNena(n)}
                   style={{ background:filterNena===n?nenaColor(n):"#1e1e1e", border:"none", color:"#fff", borderRadius:20, padding:"5px 12px", fontSize:11, cursor:"pointer", whiteSpace:"nowrap" }}>
-                  {n==="Valen"?"🌟":"n==="Pili"?"💫":"🤝"} {n}
+                  {n==="Valen"?"🌟":n==="Pili"?"💫":"🤝"} {n}
                 </button>
               ))}
             </div>
@@ -717,3 +717,4 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App />);
 </script>
 </body>
 </html>
+
