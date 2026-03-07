@@ -76,9 +76,14 @@ const CATEGORIES = [
   { id:"salud",       label:"Salud / Médicos",        emoji:"🏥" },
   { id:"ropa",        label:"Ropa / Calzado",         emoji:"👗" },
   { id:"actividades", label:"Actividades / Deportes", emoji:"⚽" },
+  { id:"mascota",     label:"Mascota / Veterinaria",  emoji:"🐾" },
   { id:"otros",       label:"Otros",                  emoji:"📦" },
 ];
+
+// Nenas para el balance/resumen (sin Frida)
 const NENAS     = ["Valen","Pili","Ambas"];
+// Para selector de a quién va el gasto
+const DESTINATARIOS = ["Valen","Pili","Ambas","Frida"];
 const USERS     = ["Gus","Betiana"];
 const TOLERANCE = 2000;
 
@@ -91,8 +96,8 @@ const getUserFromURL = () => {
   const p = new URLSearchParams(window.location.search).get("user");
   return p==="Betiana"?"Betiana":p==="Gus"?"Gus":null;
 };
-const nenaColor = n => n==="Valen"?"#f59e0b":n==="Pili"?"#06b6d4":"#a78bfa";
-const nenaBg    = (n,t) => n==="Valen"?(t.bg==="F5f5f5"||t.bg==="#f5f5f5"?"#fff7ed":"#451a03"):n==="Pili"?(t.bg==="#f5f5f5"?"#e0f2fe":"#0c1a3a"):(t.bg==="#f5f5f5"?"#ede9fe":"#1e1b4b");
+const nenaColor = n => n==="Valen"?"#f59e0b":n==="Pili"?"#06b6d4":n==="Frida"?"#f472b6":"#a78bfa";
+const nenaBg    = (n,t) => n==="Valen"?(t.bg==="#f5f5f5"?"#fff7ed":"#451a03"):n==="Pili"?(t.bg==="#f5f5f5"?"#e0f2fe":"#0c1a3a"):n==="Frida"?(t.bg==="#f5f5f5"?"#fdf2f8":"#2d1a2e"):(t.bg==="#f5f5f5"?"#ede9fe":"#1e1b4b");
 
 const api = async (body) => {
   const res = await fetch("/api/data",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
@@ -244,7 +249,7 @@ function App() {
       const isPDF=file.type==="application/pdf";
       try{
         const block=isPDF?{type:"document",source:{type:"base64",media_type:"application/pdf",data:base64}}:{type:"image",source:{type:"base64",media_type:file.type||"image/jpeg",data:base64}};
-        const res=await fetch("/api/claude",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:500,messages:[{role:"user",content:[block,{type:"text",text:`Analizá este comprobante y devolvé SOLO JSON sin markdown: {"amount":numero,"desc":"descripcion","date":"YYYY-MM-DD","category":"colegio|salud|ropa|actividades|otros"}. Hoy: ${new Date().toISOString().slice(0,10)}. amount:0 si no leés.`}]}]})});
+        const res=await fetch("/api/claude",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:500,messages:[{role:"user",content:[block,{type:"text",text:`Analizá este comprobante y devolvé SOLO JSON sin markdown: {"amount":numero,"desc":"descripcion","date":"YYYY-MM-DD","category":"colegio|salud|ropa|actividades|mascota|otros"}. Hoy: ${new Date().toISOString().slice(0,10)}. amount:0 si no leés.`}]}]})});
         const data=await res.json();
         const parsed=JSON.parse(data.content?.map(b=>b.text||"").join("").replace(/```json|```/g,"").trim());
         onDone(parsed);showToast("Comprobante escaneado ✓");
@@ -267,8 +272,10 @@ function App() {
     const exps=monthExp(m);
     const vT=exps.filter(e=>e.nena==="Valen"||e.nena==="Ambas").reduce((s,e)=>s+(e.nena==="Ambas"?Number(e.amount)/2:Number(e.amount)),0);
     const pT=exps.filter(e=>e.nena==="Pili"||e.nena==="Ambas").reduce((s,e)=>s+(e.nena==="Ambas"?Number(e.amount)/2:Number(e.amount)),0);
+    const fT=exps.filter(e=>e.nena==="Frida").reduce((s,e)=>s+Number(e.amount),0);
     const byCat=nena=>CATEGORIES.map(cat=>({...cat,total:exps.filter(e=>(e.nena===nena||e.nena==="Ambas")&&e.category===cat.id).reduce((s,e)=>s+(e.nena==="Ambas"?Number(e.amount)/2:Number(e.amount)),0)})).filter(c=>c.total>0);
-    return{valenTotal:vT,piliTotal:pT,valenCats:byCat("Valen"),piliCats:byCat("Pili")};
+    const byCatFrida=()=>CATEGORIES.map(cat=>({...cat,total:exps.filter(e=>e.nena==="Frida"&&e.category===cat.id).reduce((s,e)=>s+Number(e.amount),0)})).filter(c=>c.total>0);
+    return{valenTotal:vT,piliTotal:pT,fridaTotal:fT,valenCats:byCat("Valen"),piliCats:byCat("Pili"),fridaCats:byCatFrida()};
   };
   const getAccDebt=()=>{
     const all=[...new Set(expenses.map(e=>e.date.slice(0,7)))];
@@ -318,9 +325,9 @@ function App() {
     <style>body{font-family:Arial,sans-serif;padding:32px;color:#222;max-width:800px;margin:0 auto}h1{color:#f97316}h2{color:#444;margin:24px 0 12px;border-bottom:2px solid #eee;padding-bottom:6px}
     table{width:100%;border-collapse:collapse;margin:12px 0;font-size:14px}th,td{border:1px solid #ddd;padding:8px 12px;text-align:left}th{background:#f3f4f6}tr:nth-child(even){background:#f9fafb}
     .badge{display:inline-block;padding:3px 10px;border-radius:6px;font-size:12px;font-weight:600}.ok{background:#dcfce7;color:#166534}.err{background:#fee2e2;color:#991b1b}
-    .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:12px 0}.card{background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:16px}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:12px 0}.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin:12px 0}.card{background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:16px}
     .num{font-size:24px;font-weight:700;color:#f97316}footer{margin-top:40px;color:#999;font-size:12px;border-top:1px solid #eee;padding-top:12px}</style></head><body>
-    <h1>👧 Gastos de las Nenas</h1><p style="color:#888">Reporte · <strong>${monthLabel(m)}</strong> · ${new Date().toLocaleDateString("es-AR")}</p>
+    <h1>👧 Gastos Familiares</h1><p style="color:#888">Reporte · <strong>${monthLabel(m)}</strong> · ${new Date().toLocaleDateString("es-AR")}</p>
     <h2>💰 Balance</h2>
     <div class="grid">
       <div class="card"><h3>👨 Gus</h3><div class="num">${fmt(b.gus)}</div><div style="color:#888;font-size:13px">50% = ${fmt(b.half)}</div></div>
@@ -328,16 +335,17 @@ function App() {
     </div>
     <p><strong>Total:</strong> ${fmt(b.total)} | <strong>Estado:</strong> <span class="badge ${b.settled?"ok":"err"}">${b.settled?"✅ Compensado":`⚠️ ${b.debtor} debe ${fmt(b.remaining)} a ${b.creditor}`}</span></p>
     ${pays.length>0?`<p><strong>Pagos:</strong> ${pays.map(p=>`${p.date} ${fmt(p.amount)}${p.note?` (${p.note})`:""}`).join(" · ")}</p>`:""}
-    <h2>👧 Por Niña</h2>
-    <div class="grid">
+    <h2>👧 Por integrante</h2>
+    <div class="grid3">
       <div class="card"><h3>🌟 Valen</h3><div class="num" style="color:#f59e0b">${fmt(ns.valenTotal)}</div>${ns.valenCats.map(c=>`<div style="display:flex;justify-content:space-between;font-size:13px;margin-top:6px"><span>${c.emoji} ${c.label}</span><span>${fmt(c.total)}</span></div>`).join("")}</div>
       <div class="card"><h3>💫 Pili</h3><div class="num" style="color:#06b6d4">${fmt(ns.piliTotal)}</div>${ns.piliCats.map(c=>`<div style="display:flex;justify-content:space-between;font-size:13px;margin-top:6px"><span>${c.emoji} ${c.label}</span><span>${fmt(c.total)}</span></div>`).join("")}</div>
+      <div class="card"><h3>🐱 Frida</h3><div class="num" style="color:#f472b6">${fmt(ns.fridaTotal)}</div>${ns.fridaCats.map(c=>`<div style="display:flex;justify-content:space-between;font-size:13px;margin-top:6px"><span>${c.emoji} ${c.label}</span><span>${fmt(c.total)}</span></div>`).join("")}${ns.fridaCats.length===0?'<div style="font-size:13px;color:#999">Sin gastos</div>':""}</div>
     </div>
     <h2>📋 Detalle</h2>
-    <table><tr><th>Fecha</th><th>Quién</th><th>Niña</th><th>Categoría</th><th>Descripción</th><th>Monto</th></tr>
+    <table><tr><th>Fecha</th><th>Quién</th><th>Para</th><th>Categoría</th><th>Descripción</th><th>Monto</th></tr>
     ${exps.sort((a,b)=>a.date.localeCompare(b.date)).map(e=>`<tr><td>${e.date}</td><td style="font-weight:600">${e.who}</td><td>${e.nena||"-"}</td><td>${CATEGORIES.find(c=>c.id===e.category)?.emoji||""} ${CATEGORIES.find(c=>c.id===e.category)?.label||e.category}</td><td>${e.desc||e.description}</td><td style="font-weight:600">${fmt(e.amount)}</td></tr>`).join("")}
     <tr style="background:#f3f4f6"><td colspan="5"><strong>Total</strong></td><td><strong>${fmt(b.total)}</strong></td></tr></table>
-    <footer>Gastos Nenas App · Gus & Betiana · ${monthLabel(m)}</footer></body></html>`;
+    <footer>Gastos Familiares App · Gus & Betiana · ${monthLabel(m)}</footer></body></html>`;
   };
 
   const exportReport=async()=>{
@@ -447,8 +455,6 @@ function App() {
       {showSettings&&(
         <div style={mOverlay}><div style={{...mBox,maxWidth:380}}>
           <div style={{fontWeight:700,fontSize:18,marginBottom:20,color:t.text}}>⚙️ Configuración</div>
-
-          {/* Avatar */}
           <div style={{marginBottom:24,textAlign:"center"}}>
             <input type="file" accept="image/*" ref={photoRef} style={{display:"none"}} onChange={e=>e.target.files[0]&&savePhoto(e.target.files[0])}/>
             <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:10}}>
@@ -456,8 +462,6 @@ function App() {
               <button onClick={()=>photoRef.current.click()} style={{...btn(),background:t.surface2,color:t.textMuted,fontSize:13}}>📷 Cambiar foto</button>
             </div>
           </div>
-
-          {/* Theme */}
           <div style={{marginBottom:20}}>
             <label style={label()}>Tema visual</label>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
@@ -469,7 +473,6 @@ function App() {
               ))}
             </div>
           </div>
-
           <button onClick={()=>setShowSettings(false)} style={{...btn(),width:"100%",background:t.surface2,color:t.textMuted}}>Cerrar</button>
         </div></div>
       )}
@@ -496,7 +499,7 @@ function App() {
             <Avatar user={currentUser} photo={myPhoto} size={42} t={t} onClick={()=>setShowSettings(true)}/>
             <div>
               <div style={{fontWeight:700,fontSize:17}}>Hola, {currentUser} 👋</div>
-              <div style={{color:t.textMuted,fontSize:13}}>Gastos de las nenas</div>
+              <div style={{color:t.textMuted,fontSize:13}}>Gastos familiares</div>
             </div>
           </div>
           <div style={{display:"flex",gap:8,alignItems:"center"}}>
@@ -517,7 +520,6 @@ function App() {
           {USERS.map(w=>{
             const amt=w==="Gus"?bal.gus:bal.bet;
             const isDebtor=!bal.balanced&&w===bal.debtor;
-            const isCreditor=!bal.balanced&&w===bal.creditor;
             const borderColor=bal.balanced?t.successBorder:isDebtor?t.danger:t.success;
             return(
               <div key={w} style={{flex:1,...card({padding:"12px 14px",border:`1.5px solid ${borderColor}`})}}>
@@ -535,12 +537,12 @@ function App() {
           })}
         </div>
 
-        {/* Nenas */}
-        <div style={{display:"flex",gap:10,marginBottom:10}}>
-          {[["Valen","🌟",ns.valenTotal],["Pili","💫",ns.piliTotal]].map(([n,icon,total])=>(
-            <div key={n} style={{flex:1,...card({padding:"10px 14px",border:`1px solid ${nenaColor(n)}33`})}}>
-              <div style={{fontSize:13,color:nenaColor(n),fontWeight:700}}>{icon} {n}</div>
-              <div style={{fontSize:18,fontWeight:700,marginTop:4}}>{fmt(total)}</div>
+        {/* Nenas + Frida */}
+        <div style={{display:"flex",gap:8,marginBottom:10}}>
+          {[["Valen","🌟",ns.valenTotal],["Pili","💫",ns.piliTotal],["Frida","🐱",ns.fridaTotal]].map(([n,icon,total])=>(
+            <div key={n} style={{flex:1,...card({padding:"10px 10px",border:`1px solid ${nenaColor(n)}33`})}}>
+              <div style={{fontSize:12,color:nenaColor(n),fontWeight:700}}>{icon} {n}</div>
+              <div style={{fontSize:16,fontWeight:700,marginTop:3}}>{fmt(total)}</div>
             </div>
           ))}
         </div>
@@ -553,7 +555,6 @@ function App() {
               {bal.balanced?`Parejos · dif. ${fmt(bal.compensation)}`:`${bal.debtor} debe ${fmt(bal.remaining)} a ${bal.creditor}`}
             </span>
           </div>
-          {/* Botón pagar solo visible para el deudor */}
           {!bal.balanced&&!bal.settled&&currentUser===bal.debtor&&(
             <button onClick={()=>{setPayForm(f=>({...f,amount:bal.remaining.toString(),month:filterMonth}));setShowPayModal(true);}}
               style={{...btn(),background:t.accent,color:"#fff",padding:"7px 14px",fontSize:13}}>Pagar</button>
@@ -596,7 +597,7 @@ function App() {
                         <Avatar user={e.who} photo={e.who===currentUser?myPhoto:otherPhoto} size={18} t={t}/>
                         <span style={{fontWeight:600,color:t.text,fontSize:13}}>{e.who}</span>
                       </div>
-                      {e.nena&&<span style={{background:t.surface2,color:nenaColor(e.nena),borderRadius:6,padding:"1px 7px",fontSize:12,fontWeight:700,border:`1px solid ${nenaColor(e.nena)}44`}}>{e.nena}</span>}
+                      {e.nena&&<span style={{background:t.surface2,color:nenaColor(e.nena),borderRadius:6,padding:"1px 7px",fontSize:12,fontWeight:700,border:`1px solid ${nenaColor(e.nena)}44`}}>{e.nena==="Frida"?"🐱":""}{e.nena}</span>}
                       {gallery[e.id]&&<a href={gallery[e.id].link} target="_blank" rel="noreferrer" style={{color:t.accent,fontSize:12}}>☁️ Ver</a>}
                     </div>
                   </div>
@@ -626,10 +627,10 @@ function App() {
               ))}
             </div>
             <div style={{display:"flex",gap:8,marginBottom:16,overflowX:"auto",paddingBottom:4}}>
-              <button onClick={()=>setFilterNena("all")} style={{...btn(),background:filterNena==="all"?t.accent:t.surface2,color:filterNena==="all"?"#fff":t.textMuted,borderRadius:20,padding:"6px 14px",fontSize:13,whiteSpace:"nowrap"}}>👧 Todas</button>
-              {NENAS.map(n=>(
+              <button onClick={()=>setFilterNena("all")} style={{...btn(),background:filterNena==="all"?t.accent:t.surface2,color:filterNena==="all"?"#fff":t.textMuted,borderRadius:20,padding:"6px 14px",fontSize:13,whiteSpace:"nowrap"}}>Todos</button>
+              {DESTINATARIOS.map(n=>(
                 <button key={n} onClick={()=>setFilterNena(n)} style={{...btn(),background:filterNena===n?nenaColor(n):t.surface2,color:filterNena===n?"#fff":t.textMuted,borderRadius:20,padding:"6px 14px",fontSize:13,whiteSpace:"nowrap"}}>
-                  {n==="Valen"?"🌟":n==="Pili"?"💫":"🤝"} {n}
+                  {n==="Valen"?"🌟":n==="Pili"?"💫":n==="Frida"?"🐱":"🤝"} {n}
                 </button>
               ))}
             </div>
@@ -646,7 +647,7 @@ function App() {
                         <Avatar user={e.who} photo={e.who===currentUser?myPhoto:otherPhoto} size={18} t={t}/>
                         <span style={{fontWeight:600,color:t.text,fontSize:13}}>{e.who}</span>
                       </div>
-                      {e.nena&&<span style={{background:t.surface2,color:nenaColor(e.nena),borderRadius:6,padding:"1px 7px",fontSize:12,fontWeight:700,border:`1px solid ${nenaColor(e.nena)}44`}}>{e.nena}</span>}
+                      {e.nena&&<span style={{background:t.surface2,color:nenaColor(e.nena),borderRadius:6,padding:"1px 7px",fontSize:12,fontWeight:700,border:`1px solid ${nenaColor(e.nena)}44`}}>{e.nena==="Frida"?"🐱":""}{e.nena}</span>}
                       <span style={{color:t.textFaint}}>{catLabel(e.category)}</span>
                       {gallery[e.id]&&<a href={gallery[e.id].link} target="_blank" rel="noreferrer" style={{color:t.accent,fontSize:12}}>☁️</a>}
                     </div>
@@ -689,8 +690,9 @@ function App() {
               );})}
             </div>
 
-            <div style={{fontWeight:700,fontSize:15,marginBottom:12}}>👧 Gastos por niña</div>
-            <div style={{display:"flex",gap:10,marginBottom:12}}>
+            <div style={{fontWeight:700,fontSize:15,marginBottom:12}}>👧 Por integrante</div>
+            {/* Nenas row */}
+            <div style={{display:"flex",gap:10,marginBottom:10}}>
               {[["Valen","🌟",ns.valenTotal,ns.valenCats],["Pili","💫",ns.piliTotal,ns.piliCats]].map(([n,icon,total,cats])=>(
                 <div key={n} style={{flex:1,...card({padding:14,border:`1px solid ${nenaColor(n)}33`})}}>
                   <div style={{color:nenaColor(n),fontWeight:700,fontSize:14,marginBottom:6}}>{icon} {n}</div>
@@ -704,6 +706,20 @@ function App() {
                   {cats.length===0&&<div style={{fontSize:13,color:t.textFaint}}>Sin gastos</div>}
                 </div>
               ))}
+            </div>
+            {/* Frida card full width */}
+            <div style={{...card({padding:14,marginBottom:12,border:`1px solid ${nenaColor("Frida")}33`})}}>
+              <div style={{color:nenaColor("Frida"),fontWeight:700,fontSize:14,marginBottom:6}}>🐱 Frida</div>
+              <div style={{fontSize:20,fontWeight:700,marginBottom:8}}>{fmt(ns.fridaTotal)}</div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+                {ns.fridaCats.map(c=>(
+                  <div key={c.id} style={{display:"flex",justifyContent:"space-between",fontSize:13,color:t.textMuted,minWidth:120,flex:1}}>
+                    <span>{c.emoji} {c.label.split("/")[0].trim()}</span>
+                    <span style={{color:t.text,fontWeight:600,marginLeft:8}}>{fmt(c.total)}</span>
+                  </div>
+                ))}
+                {ns.fridaCats.length===0&&<div style={{fontSize:13,color:t.textFaint}}>Sin gastos este mes 😸</div>}
+              </div>
             </div>
 
             <div style={{background:bal.settled?t.successBg:t.dangerBg,border:`1px solid ${bal.settled?t.successBorder:t.dangerBorder}`,borderRadius:10,padding:18,marginBottom:12,textAlign:"center"}}>
@@ -745,7 +761,7 @@ function App() {
             {CATEGORIES.map(cat=>{const total=monthExp(filterMonth).filter(e=>e.category===cat.id).reduce((s,e)=>s+Number(e.amount),0);if(!total) return null;const pct=bal.total>0?(total/bal.total)*100:0;return(
               <div key={cat.id} style={{...card({padding:"12px 16px",marginBottom:8})}}>
                 <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}><span style={{fontSize:15}}>{cat.emoji} {cat.label}</span><span style={{fontWeight:700,fontSize:15}}>{fmt(total)}</span></div>
-                <div style={{background:t.surface2,borderRadius:4,height:5}}><div style={{background:t.accent,height:5,borderRadius:4,width:`${pct}%`}}/></div>
+                <div style={{background:t.surface2,borderRadius:4,height:5}}><div style={{background:cat.id==="mascota"?nenaColor("Frida"):t.accent,height:5,borderRadius:4,width:`${pct}%`}}/></div>
               </div>
             );})}
           </div>
@@ -778,15 +794,22 @@ function App() {
 
             <div style={{marginBottom:18}}>
               <label style={label()}>¿Para quién es el gasto?</label>
-              <div style={{display:"flex",gap:10}}>
-                {NENAS.map(n=>(
+              {/* Nenas row */}
+              <div style={{display:"flex",gap:8,marginBottom:8}}>
+                {["Valen","Pili","Ambas"].map(n=>(
                   <button key={n} onClick={()=>setForm(f=>({...f,nena:n}))}
-                    style={{...btn(),flex:1,background:form.nena===n?t.surface2:t.surface,border:`2px solid ${form.nena===n?nenaColor(n):t.border}`,color:form.nena===n?nenaColor(n):t.textMuted,padding:"14px 6px",display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
-                    <span style={{fontSize:22}}>{n==="Valen"?"🌟":n==="Pili"?"💫":"🤝"}</span>
-                    <span style={{fontSize:13}}>{n}</span>
+                    style={{...btn(),flex:1,background:form.nena===n?t.surface2:t.surface,border:`2px solid ${form.nena===n?nenaColor(n):t.border}`,color:form.nena===n?nenaColor(n):t.textMuted,padding:"12px 6px",display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
+                    <span style={{fontSize:20}}>{n==="Valen"?"🌟":n==="Pili"?"💫":"🤝"}</span>
+                    <span style={{fontSize:12}}>{n}</span>
                   </button>
                 ))}
               </div>
+              {/* Frida separada */}
+              <button onClick={()=>setForm(f=>({...f,nena:"Frida",category:f.category==="colegio"||f.category==="ropa"||f.category==="actividades"?"mascota":f.category}))}
+                style={{...btn(),width:"100%",background:form.nena==="Frida"?t.surface2:t.surface,border:`2px solid ${form.nena==="Frida"?nenaColor("Frida"):t.border}`,color:form.nena==="Frida"?nenaColor("Frida"):t.textMuted,padding:"12px",display:"flex",alignItems:"center",justifyContent:"center",gap:10}}>
+                <span style={{fontSize:20}}>🐱</span>
+                <span style={{fontSize:14,fontWeight:700}}>Frida</span>
+              </button>
             </div>
 
             <div style={{marginBottom:16}}><label style={label()}>Monto (ARS)</label><input type="number" value={form.amount} onChange={e=>setForm(f=>({...f,amount:e.target.value}))} placeholder="0" style={inp({fontSize:24,fontWeight:700})}/></div>
