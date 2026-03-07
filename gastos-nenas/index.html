@@ -139,7 +139,8 @@ function App() {
   const [filterCat,     setFilterCat]     = useState("all");
   const [filterNena,    setFilterNena]    = useState("all");
   const [editing,       setEditing]       = useState(null);
-  const [form,          setForm]          = useState({who:currentUser||"Gus",amount:"",category:"colegio",nena:"Valen",desc:"",date:new Date().toISOString().slice(0,10)});
+  const [form,          setForm]          = useState({who:currentUser||"Gus",amount:"",category:"colegio",nena:"Valen",desc:"",date:new Date().toISOString().slice(0,10),installments:1,isInstallment:false});
+  const [cancelInstallConfirm, setCancelInstallConfirm] = useState(null);
   const [scanLoading,   setScanLoading]   = useState(false);
   const [uploadingFile, setUploadingFile] = useState(false);
   const [toast,         setToast]         = useState(null);
@@ -194,7 +195,7 @@ function App() {
 
   const showToast=(msg,type="ok")=>{setToast({msg,type});setTimeout(()=>setToast(null),3500);};
   const resetForm=()=>{
-    setForm({who:currentUser||"Gus",amount:"",category:"colegio",nena:"Valen",desc:"",date:new Date().toISOString().slice(0,10)});
+    setForm({who:currentUser||"Gus",amount:"",category:"colegio",nena:"Valen",desc:"",date:new Date().toISOString().slice(0,10),installments:1,isInstallment:false});
     setEditing(null);
   };
 
@@ -232,11 +233,21 @@ function App() {
           :{type:"image",source:{type:"base64",media_type:file.type||"image/jpeg",data:base64}};
         const res=await fetch("/api/claude",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
           model:"claude-sonnet-4-20250514",max_tokens:500,
-          messages:[{role:"user",content:[block,{type:"text",text:`Analizá este comprobante y devolvé SOLO JSON sin markdown: {"amount":numero,"desc":"descripcion","date":"YYYY-MM-DD","category":"colegio|salud|ropa|actividades|mascota|otros"}. Hoy: ${new Date().toISOString().slice(0,10)}. amount:0 si no leés.`}]}]
+          messages:[{role:"user",content:[block,{type:"text",text:`Analizá este comprobante y devolvé SOLO JSON sin markdown:
+{"amount":numero_total,"desc":"descripcion breve","date":"YYYY-MM-DD","category":"colegio|salud|ropa|actividades|mascota|otros","installments":numero,"has_interest":boolean}
+
+Reglas:
+- amount: monto TOTAL de la compra (no la cuota individual). Si dice "6 cuotas de $5000" → amount=30000.
+- installments: número de cuotas si lo dice explícitamente (ej: "6 cuotas", "cantidad de cuotas: 3", "plan 12 pagos"). Si no hay cuotas → 1.
+- has_interest: true si dice "con interés", "CFT", "TNA" o similar. false si dice "sin interés" o no menciona nada.
+- date: fecha del comprobante en formato YYYY-MM-DD. Hoy: ${new Date().toISOString().slice(0,10)}.
+- amount: 0 si no podés leer el monto.`}]}]
         })});
         const data=await res.json();
         const parsed=JSON.parse(data.content?.map(b=>b.text||"").join("").replace(/```json|```/g,"").trim());
-        onDone(parsed);showToast("Comprobante escaneado ✓");
+        onDone(parsed);
+        const cuotas = parsed.installments > 1 ? ` · ${parsed.installments} cuotas${parsed.has_interest?" (con interés)":parsed.has_interest===false?" (sin interés)":""}` : "";
+        showToast(`Comprobante escaneado ✓${cuotas}`);
       }catch{showToast("No pude leer el archivo","err");}
       setLoading(false);
     };
@@ -289,34 +300,85 @@ function App() {
   const saveExpense=async(forceSave=false)=>{
     if(!form.amount||isNaN(parseFloat(form.amount))) return showToast("Ingresá un monto válido","err");
     if(!form.desc.trim()) return showToast("Agregá una descripción","err");
+    const totalAmount = parseFloat(form.amount);
+    const numInstallments = form.isInstallment ? parseInt(form.installments)||1 : 1;
+    const installmentAmount = numInstallments > 1 ? Math.round(totalAmount / numInstallments) : totalAmount;
     if(!editing&&!forceSave){
-      const amt=parseFloat(form.amount);
-      const dup=expenses.find(e=>Number(e.amount)===amt&&e.date===form.date&&e.who===form.who);
-      if(dup) return setDupConfirm({amt,date:form.date});
+      const dup=expenses.find(e=>Number(e.amount)===totalAmount&&e.date===form.date&&e.who===form.who);
+      if(dup) return setDupConfirm({amt:totalAmount,date:form.date});
     }
-    const id=editing||Date.now().toString();
-    const entry={id,who:form.who,amount:parseFloat(form.amount),category:form.category,nena:form.nena,description:form.desc,date:form.date};
+
     try{
       if(editing){
-        await api({action:"update",table:"expenses",id,data:entry});
+        // Editar solo este gasto individual
+        const entry={id:editing,who:form.who,amount:installmentAmount,category:form.category,nena:form.nena,description:form.desc,date:form.date};
+        await api({action:"update",table:"expenses",id:editing,data:entry});
         setExpenses(prev=>prev.map(e=>e.id===editing?{...entry,desc:form.desc}:e));
         showToast("Gasto actualizado ✓");
+      } else if(numInstallments > 1) {
+        // Generar grupo de cuotas
+        const groupId = Date.now().toString();
+        const newExps = [];
+        for(let i=0;i<numInstallments;i++){
+          const d = new Date(form.date);
+          d.setMonth(d.getMonth()+i);
+          const monthStr = d.toISOString().slice(0,7);
+          const dayStr   = form.date.slice(8,10);
+          const dateStr  = `${monthStr}-${dayStr}`;
+          const expId    = `${groupId}-${i+1}`;
+          const isCancelled = false;
+          const entry={
+            id:expId, who:form.who, amount:installmentAmount,
+            category:form.category, nena:form.nena,
+            description:`${form.desc} (${i+1}/${numInstallments})`,
+            date:dateStr,
+            installment_group:groupId,
+            installment_num:i+1,
+            installment_total:numInstallments,
+            cancelled:isCancelled,
+          };
+          await api({action:"insert",table:"expenses",data:entry});
+          newExps.push({...entry,desc:entry.description});
+        }
+        setExpenses(prev=>[...newExps,...prev]);
+        // Subir comprobante solo a la cuota 1
+        if(form._pendingFile){
+          const firstId=`${groupId}-1`;
+          const result=await uploadComprobante(form._pendingFile,firstId,form.who,form.date.slice(0,7));
+          if(result){
+            await api({action:"upsertGallery",data:{expense_id:firstId,link:result.url,name:form._pendingFile.name||firstId,storage_path:result.storagePath}});
+            setGallery(prev=>({...prev,[firstId]:{link:result.url,name:form._pendingFile.name||firstId}}));
+          }
+        }
+        showToast(`${numInstallments} cuotas generadas ✓`);
       } else {
+        const id=Date.now().toString();
+        const entry={id,who:form.who,amount:installmentAmount,category:form.category,nena:form.nena,description:form.desc,date:form.date};
         await api({action:"insert",table:"expenses",data:entry});
         setExpenses(prev=>[{...entry,desc:form.desc},...prev]);
+        if(form._pendingFile){
+          const result=await uploadComprobante(form._pendingFile,id,form.who,form.date.slice(0,7));
+          if(result){
+            await api({action:"upsertGallery",data:{expense_id:id,link:result.url,name:form._pendingFile.name||id,storage_path:result.storagePath}});
+            setGallery(prev=>({...prev,[id]:{link:result.url,name:form._pendingFile.name||id}}));
+          }
+        }
         showToast("Gasto cargado ✓");
       }
-      // Subir comprobante a Supabase Storage
-      if(form._pendingFile){
-        const result = await uploadComprobante(form._pendingFile, id, form.who, form.date.slice(0,7));
-        if(result){
-          await api({action:"upsertGallery",data:{expense_id:id,link:result.url,name:form._pendingFile.name||id,storage_path:result.storagePath}});
-          setGallery(prev=>({...prev,[id]:{link:result.url,name:form._pendingFile.name||id}}));
-          showToast("Comprobante guardado ✓");
-        }
-      }
-    }catch{showToast("Error al guardar","err");}
+    }catch(e){showToast("Error al guardar","err");}
     resetForm();setView("dashboard");
+  };
+
+  // Cancelar cuotas futuras de un grupo
+  const cancelFutureInstallments=async(groupId, fromNum)=>{
+    const today=new Date().toISOString().slice(0,10);
+    const toCancel=expenses.filter(e=>e.installment_group===groupId&&e.installment_num>fromNum&&e.date>=today&&!e.cancelled);
+    for(const e of toCancel){
+      await api({action:"update",table:"expenses",id:e.id,data:{...e,cancelled:true,description:e.description+" [cancelada]"}});
+    }
+    setExpenses(prev=>prev.map(e=>toCancel.find(c=>c.id===e.id)?{...e,cancelled:true,desc:e.desc+" [cancelada]",description:e.description+" [cancelada]"}:e));
+    setCancelInstallConfirm(null);
+    showToast(`${toCancel.length} cuotas futuras canceladas`);
   };
 
   const deleteExpense=async(id)=>{
@@ -443,7 +505,20 @@ function App() {
         </div></div>
       )}
 
-      {/* Payment */}
+      {/* Cancel installments */}
+      {cancelInstallConfirm&&(
+        <div style={mOverlay}><div style={{...mBox,textAlign:"center"}}>
+          <div style={{fontSize:36,marginBottom:12}}>🔄</div>
+          <div style={{fontWeight:700,fontSize:17,marginBottom:10,color:t.text}}>¿Cancelar cuotas futuras?</div>
+          <div style={{color:t.textMuted,fontSize:14,marginBottom:24}}>Se cancelarán las cuotas {cancelInstallConfirm.fromNum+1} a {cancelInstallConfirm.total} de <strong style={{color:t.accent}}>{cancelInstallConfirm.desc}</strong>.<br/>Quedarán registradas como canceladas.</div>
+          <div style={{display:"flex",gap:12}}>
+            <button onClick={()=>setCancelInstallConfirm(null)} style={{...btn(),flex:1,background:t.surface2,color:t.textMuted}}>No</button>
+            <button onClick={()=>cancelFutureInstallments(cancelInstallConfirm.groupId,cancelInstallConfirm.fromNum)} style={{...btn(),flex:1,background:t.warn,color:"#000"}}>Cancelar cuotas</button>
+          </div>
+        </div></div>
+      )}
+
+
       {showPayModal&&(
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:99}}>
           <div style={{...card(),borderRadius:"16px 16px 0 0",padding:28,width:"100%",maxWidth:520}}>
@@ -609,8 +684,8 @@ function App() {
             <div style={{fontWeight:700,fontSize:16,marginBottom:16}}>Últimos gastos · {monthLabel(filterMonth)}</div>
             {monthExp(filterMonth).length===0
               ?<div style={{textAlign:"center",padding:"50px 0",color:t.textMuted,fontSize:16}}>No hay gastos este mes</div>
-              :monthExp(filterMonth).map(e=>(
-                <div key={e.id} style={{...card({padding:"14px 16px",marginBottom:10}),display:"flex",alignItems:"center",gap:14}}>
+              :monthExp(filterMonth).filter(e=>!e.cancelled).map(e=>(
+                <div key={e.id} style={{...card({padding:"14px 16px",marginBottom:10,opacity:e.cancelled?0.5:1}),display:"flex",alignItems:"center",gap:14}}>
                   <div style={{fontSize:26}}>{catEmoji(e.category)}</div>
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{fontWeight:600,fontSize:15,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.desc||e.description}</div>
@@ -621,6 +696,7 @@ function App() {
                         <span style={{fontWeight:600,color:t.text,fontSize:13}}>{e.who}</span>
                       </div>
                       {e.nena&&<span style={{background:t.surface2,color:nenaColor(e.nena),borderRadius:6,padding:"1px 7px",fontSize:12,fontWeight:700,border:`1px solid ${nenaColor(e.nena)}44`}}>{e.nena==="Frida"?"🐱 ":""}{e.nena}</span>}
+                      {e.installment_group&&<span style={{background:t.accentBg,color:t.accent,borderRadius:6,padding:"1px 7px",fontSize:12,fontWeight:700}}>💳 {e.installment_num}/{e.installment_total}</span>}
                       {gallery[e.id]&&<a href={gallery[e.id].link} target="_blank" rel="noreferrer" style={{color:t.accent,fontSize:12}}>☁️ Ver</a>}
                     </div>
                   </div>
@@ -628,10 +704,13 @@ function App() {
                     <div style={{fontWeight:700,fontSize:17}}>{fmt(e.amount)}</div>
                     {e.who===currentUser&&(
                       <div style={{display:"flex",gap:6,marginTop:6,justifyContent:"flex-end"}}>
-                        <button onClick={()=>{setForm({who:e.who,amount:e.amount.toString(),category:e.category,nena:e.nena||"Valen",desc:e.desc||e.description,date:e.date});setEditing(e.id);setView("form");}}
-                          style={{...btn(),background:t.surface2,color:t.accent,padding:"5px 10px",fontSize:13}}>✏️</button>
-                        <button onClick={()=>setDeleteConfirm(e.id)}
-                          style={{...btn(),background:t.surface2,color:t.danger,padding:"5px 10px",fontSize:13}}>🗑️</button>
+                        {!e.installment_group&&<button onClick={()=>{setForm({who:e.who,amount:e.amount.toString(),category:e.category,nena:e.nena||"Valen",desc:e.desc||e.description,date:e.date,installments:1,isInstallment:false});setEditing(e.id);setView("form");}}
+                          style={{...btn(),background:t.surface2,color:t.accent,padding:"5px 10px",fontSize:13}}>✏️</button>}
+                        {e.installment_group&&e.installment_num<e.installment_total&&(
+                          <button onClick={()=>setCancelInstallConfirm({groupId:e.installment_group,fromNum:e.installment_num,total:e.installment_total,desc:form.desc||e.description?.split(" (")[0]})}
+                            style={{...btn(),background:t.surface2,color:t.warn,padding:"5px 10px",fontSize:13}}>✂️</button>
+                        )}
+                        <button onClick={()=>setDeleteConfirm(e.id)} style={{...btn(),background:t.surface2,color:t.danger,padding:"5px 10px",fontSize:13}}>🗑️</button>
                       </div>
                     )}
                   </div>
@@ -659,9 +738,9 @@ function App() {
                 </button>
               ))}
             </div>
-            {filtered.length===0
+            {filtered.filter(e=>!e.cancelled).length===0
               ?<div style={{textAlign:"center",padding:"50px 0",color:t.textMuted,fontSize:16}}>No hay gastos</div>
-              :filtered.map(e=>(
+              :filtered.filter(e=>!e.cancelled).map(e=>(
                 <div key={e.id} style={{...card({padding:"14px 16px",marginBottom:10}),display:"flex",alignItems:"center",gap:14}}>
                   <div style={{fontSize:24}}>{catEmoji(e.category)}</div>
                   <div style={{flex:1,minWidth:0}}>
@@ -673,6 +752,7 @@ function App() {
                         <span style={{fontWeight:600,color:t.text,fontSize:13}}>{e.who}</span>
                       </div>
                       {e.nena&&<span style={{background:t.surface2,color:nenaColor(e.nena),borderRadius:6,padding:"1px 7px",fontSize:12,fontWeight:700,border:`1px solid ${nenaColor(e.nena)}44`}}>{e.nena==="Frida"?"🐱 ":""}{e.nena}</span>}
+                      {e.installment_group&&<span style={{background:t.accentBg,color:t.accent,borderRadius:6,padding:"1px 7px",fontSize:12,fontWeight:700}}>💳 {e.installment_num}/{e.installment_total}</span>}
                       <span style={{color:t.textFaint}}>{catLabel(e.category)}</span>
                       {gallery[e.id]&&<a href={gallery[e.id].link} target="_blank" rel="noreferrer" style={{color:t.accent,fontSize:12}}>☁️</a>}
                     </div>
@@ -681,10 +761,13 @@ function App() {
                     <div style={{fontWeight:700,fontSize:15}}>{fmt(e.amount)}</div>
                     {e.who===currentUser&&(
                       <div style={{display:"flex",gap:6,marginTop:6,justifyContent:"flex-end"}}>
-                        <button onClick={()=>{setForm({who:e.who,amount:e.amount.toString(),category:e.category,nena:e.nena||"Valen",desc:e.desc||e.description,date:e.date});setEditing(e.id);setView("form");}}
-                          style={{...btn(),background:t.surface2,color:t.accent,padding:"5px 10px",fontSize:13}}>✏️</button>
-                        <button onClick={()=>setDeleteConfirm(e.id)}
-                          style={{...btn(),background:t.surface2,color:t.danger,padding:"5px 10px",fontSize:13}}>🗑️</button>
+                        {!e.installment_group&&<button onClick={()=>{setForm({who:e.who,amount:e.amount.toString(),category:e.category,nena:e.nena||"Valen",desc:e.desc||e.description,date:e.date,installments:1,isInstallment:false});setEditing(e.id);setView("form");}}
+                          style={{...btn(),background:t.surface2,color:t.accent,padding:"5px 10px",fontSize:13}}>✏️</button>}
+                        {e.installment_group&&e.installment_num<e.installment_total&&(
+                          <button onClick={()=>setCancelInstallConfirm({groupId:e.installment_group,fromNum:e.installment_num,total:e.installment_total,desc:e.description?.split(" (")[0]})}
+                            style={{...btn(),background:t.surface2,color:t.warn,padding:"5px 10px",fontSize:13}}>✂️</button>
+                        )}
+                        <button onClick={()=>setDeleteConfirm(e.id)} style={{...btn(),background:t.surface2,color:t.danger,padding:"5px 10px",fontSize:13}}>🗑️</button>
                       </div>
                     )}
                   </div>
@@ -871,7 +954,17 @@ function App() {
                   onChange={e=>{
                     if(!e.target.files[0]) return;
                     const f=e.target.files[0];
-                    scanFile(f,p=>setForm(prev=>({...prev,amount:p.amount>0?p.amount.toString():prev.amount,desc:p.desc||prev.desc,date:p.date||prev.date,category:p.category||prev.category,_pendingFile:f})),setScanLoading);
+                    scanFile(f,p=>setForm(prev=>({
+                      ...prev,
+                      amount:p.amount>0?p.amount.toString():prev.amount,
+                      desc:p.desc||prev.desc,
+                      date:p.date||prev.date,
+                      category:p.category||prev.category,
+                      isInstallment:p.installments>1,
+                      installments:p.installments>1?p.installments:prev.installments,
+                      _pendingFile:f,
+                      _hasInterest:p.has_interest||false,
+                    })),setScanLoading);
                   }}/>
                 <button onClick={()=>fileRef.current.click()} disabled={scanLoading}
                   style={{...btn(),width:"100%",background:t.accentBg,border:`1.5px dashed ${t.accent}`,color:t.accent,padding:18,marginBottom:20,display:"flex",alignItems:"center",justifyContent:"center",gap:10,boxSizing:"border-box"}}>
@@ -922,6 +1015,42 @@ function App() {
 
             <div style={{marginBottom:24}}><label style={label()}>Fecha</label>
               <input type="date" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))} style={inp()}/></div>
+
+            {/* Cuotas — solo en modo nuevo */}
+            {!editing&&(
+              <div style={{...card({padding:16,marginBottom:24,border:`1px solid ${form.isInstallment?t.accent:t.border}`})}}>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:form.isInstallment?14:0}}>
+                  <div>
+                    <div style={{fontWeight:700,fontSize:14,color:t.text}}>💳 ¿Es en cuotas?</div>
+                    {!form.isInstallment&&<div style={{fontSize:12,color:t.textMuted,marginTop:2}}>Activá para dividir en varios meses</div>}
+                  </div>
+                  <button onClick={()=>setForm(f=>({...f,isInstallment:!f.isInstallment,installments:f.isInstallment?1:2}))}
+                    style={{...btn(),background:form.isInstallment?t.accent:t.surface2,color:form.isInstallment?"#fff":t.textMuted,padding:"8px 16px",fontSize:13}}>
+                    {form.isInstallment?"✓ Sí":"No"}
+                  </button>
+                </div>
+                {form.isInstallment&&(
+                  <div>
+                    <label style={label()}>Cantidad de cuotas</label>
+                    <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                      {[2,3,6,9,12,18,24].map(n=>(
+                        <button key={n} onClick={()=>setForm(f=>({...f,installments:n}))}
+                          style={{...btn(),background:form.installments===n?t.accent:t.surface2,color:form.installments===n?"#fff":t.textMuted,padding:"8px 14px",fontSize:14,borderRadius:8}}>
+                          {n}x
+                        </button>
+                      ))}
+                    </div>
+                    {form.amount&&!isNaN(parseFloat(form.amount))&&(
+                      <div style={{marginTop:12,background:t.accentBg,borderRadius:8,padding:"10px 14px",fontSize:13,color:t.accent}}>
+                        {form.installments} cuotas de <strong>{fmt(Math.round(parseFloat(form.amount)/form.installments))}</strong> · Total {fmt(parseFloat(form.amount))}
+                        {form._hasInterest&&<span style={{marginLeft:8,color:t.warn,fontWeight:700}}>⚠️ Con interés</span>}
+                        {form._hasInterest===false&&<span style={{marginLeft:8,color:t.success,fontWeight:700}}>✓ Sin interés</span>}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             <button onClick={()=>saveExpense(false)}
               style={{...btn(),width:"100%",background:t.accent,color:"#fff",padding:18,fontSize:17}}>
