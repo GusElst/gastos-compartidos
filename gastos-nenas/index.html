@@ -584,15 +584,6 @@ function App() {
           </div>
         )}
 
-        {/* Botón cerrar mes — solo Gus, mes no cerrado aún */}
-        {currentUser==="Gus"&&!isMonthClosed&&!isMonthSettled&&(
-          <div style={{marginTop:10}}>
-            <button onClick={()=>closeMonth(filterMonth)}
-              style={{...btn(),width:"100%",background:t.surface2,color:t.textMuted,fontSize:13,border:`1px solid ${t.border}`}}>
-              🔒 Cerrar mes {monthLabel(filterMonth)}
-            </button>
-          </div>
-        )}
         {(isMonthClosed||isMonthSettled)&&(
           <div style={{marginTop:10,background:t.surface2,border:`1px solid ${t.border}`,borderRadius:8,padding:"8px 14px",fontSize:13,color:t.textMuted,textAlign:"center"}}>
             {isMonthSettled?"✅ Mes cerrado y compensado":"🔒 Mes cerrado · compensación pendiente"}
