@@ -238,7 +238,7 @@ function App() {
           ?{type:"document",source:{type:"base64",media_type:"application/pdf",data:base64}}
           :{type:"image",source:{type:"base64",media_type:file.type||"image/jpeg",data:base64}};
         const res=await fetch("/api/claude",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
-          model:"claude-sonnet-4-20250514",max_tokens:500,
+          model:"claude-haiku-4-5-20251001",max_tokens:500,
           messages:[{role:"user",content:[block,{type:"text",text:`Analizá este comprobante y devolvé SOLO JSON sin markdown:
 {"amount":numero_total,"desc":"descripcion breve","date":"YYYY-MM-DD","category":"colegio|salud|ropa|actividades|mascota|otros","installments":numero,"has_interest":boolean}
 
