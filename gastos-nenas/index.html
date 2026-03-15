@@ -140,7 +140,8 @@ function App() {
   const [filterNena,    setFilterNena]    = useState("all");
   const [editing,       setEditing]       = useState(null);
   const [form,          setForm]          = useState({who:currentUser||"Gus",amount:"",category:"colegio",nena:"Valen",desc:"",date:new Date().toISOString().slice(0,10),installments:1,isInstallment:false});
-  const [cancelInstallConfirm, setCancelInstallConfirm] = useState(null);
+  const [liquidInstallConfirm, setLiquidInstallConfirm] = useState(null);
+  const [showDetail50, setShowDetail50] = useState(false);
   const [scanLoading,   setScanLoading]   = useState(false);
   const [uploadingFile, setUploadingFile] = useState(false);
   const [toast,         setToast]         = useState(null);
@@ -383,15 +384,26 @@ Reglas:
   };
 
   // Cancelar cuotas futuras de un grupo
-  const cancelFutureInstallments=async(groupId, fromNum)=>{
+  const liquidateInstallments=async(groupId, fromNum, currentMonth)=>{
     const today=new Date().toISOString().slice(0,10);
-    const toCancel=expenses.filter(e=>e.installment_group===groupId&&e.installment_num>fromNum&&e.date>=today&&!e.cancelled);
-    for(const e of toCancel){
-      await api({action:"update",table:"expenses",id:e.id,data:{...e,cancelled:true,description:e.description+" [cancelada]"}});
+    const toMerge=expenses.filter(e=>e.installment_group===groupId&&e.installment_num>fromNum&&!e.cancelled);
+    const totalToAdd=toMerge.reduce((s,e)=>s+Number(e.amount),0);
+    // Cancelar cuotas futuras
+    for(const e of toMerge){
+      await api({action:"update",table:"expenses",id:e.id,data:{...e,cancelled:true,description:e.description+" [liquidada]"}});
     }
-    setExpenses(prev=>prev.map(e=>toCancel.find(c=>c.id===e.id)?{...e,cancelled:true,desc:e.desc+" [cancelada]",description:e.description+" [cancelada]"}:e));
-    setCancelInstallConfirm(null);
-    showToast(`${toCancel.length} cuotas futuras canceladas`);
+    // Crear un gasto único en el mes actual con el total de las cuotas restantes
+    const currentExp=expenses.find(e=>e.installment_group===groupId&&e.installment_num===fromNum);
+    const newId=Date.now().toString();
+    const desc=(currentExp?.description||"Gasto").split(" (")[0]+" (liquidación anticipada)";
+    const newEntry={id:newId,who:currentExp.who,amount:totalToAdd,category:currentExp.category,nena:currentExp.nena,description:desc,date:today};
+    await api({action:"insert",table:"expenses",data:newEntry});
+    setExpenses(prev=>[
+      ...prev.map(e=>toMerge.find(c=>c.id===e.id)?{...e,cancelled:true,desc:e.desc+" [liquidada]",description:e.description+" [liquidada]"}:e),
+      {...newEntry,desc:desc}
+    ]);
+    setLiquidInstallConfirm(null);
+    showToast(`⚡ ${toMerge.length} cuotas liquidadas · ${fmt(totalToAdd)} imputados al mes`);
   };
 
   const deleteExpense=async(id)=>{
@@ -522,14 +534,15 @@ Reglas:
       )}
 
       {/* Cancel installments */}
-      {cancelInstallConfirm&&(
+      {liquidInstallConfirm&&(
         <div style={mOverlay}><div style={{...mBox,textAlign:"center"}}>
-          <div style={{fontSize:36,marginBottom:12}}>🔄</div>
-          <div style={{fontWeight:700,fontSize:17,marginBottom:10,color:t.text}}>¿Cancelar cuotas futuras?</div>
-          <div style={{color:t.textMuted,fontSize:14,marginBottom:24}}>Se cancelarán las cuotas {cancelInstallConfirm.fromNum+1} a {cancelInstallConfirm.total} de <strong style={{color:t.accent}}>{cancelInstallConfirm.desc}</strong>.<br/>Quedarán registradas como canceladas.</div>
+          <div style={{fontSize:36,marginBottom:12}}>⚡</div>
+          <div style={{fontWeight:700,fontSize:17,marginBottom:10,color:t.text}}>¿Liquidar cuotas restantes?</div>
+          <div style={{color:t.textMuted,fontSize:14,marginBottom:8}}>Las cuotas <strong style={{color:t.accent}}>{liquidInstallConfirm.fromNum+1} a {liquidInstallConfirm.total}</strong> de <strong style={{color:t.accent}}>{liquidInstallConfirm.desc}</strong> se suman al mes actual.</div>
+          <div style={{background:t.accentBg,border:`1px solid ${t.accent}`,borderRadius:8,padding:"10px",marginBottom:24,fontSize:15,fontWeight:700,color:t.accent}}>{fmt(liquidInstallConfirm.remaining)}</div>
           <div style={{display:"flex",gap:12}}>
-            <button onClick={()=>setCancelInstallConfirm(null)} style={{...btn(),flex:1,background:t.surface2,color:t.textMuted}}>No</button>
-            <button onClick={()=>cancelFutureInstallments(cancelInstallConfirm.groupId,cancelInstallConfirm.fromNum)} style={{...btn(),flex:1,background:t.warn,color:"#000"}}>Cancelar cuotas</button>
+            <button onClick={()=>setLiquidInstallConfirm(null)} style={{...btn(),flex:1,background:t.surface2,color:t.textMuted}}>Cancelar</button>
+            <button onClick={()=>liquidateInstallments(liquidInstallConfirm.groupId,liquidInstallConfirm.fromNum)} style={{...btn(),flex:1,background:t.accent,color:"#fff"}}>⚡ Liquidar</button>
           </div>
         </div></div>
       )}
@@ -721,13 +734,15 @@ Reglas:
                     <div style={{fontWeight:700,fontSize:17}}>{fmt(e.amount)}</div>
                     {e.who===currentUser&&(
                       <div style={{display:"flex",gap:6,marginTop:6,justifyContent:"flex-end"}}>
-                        {!e.installment_group&&<button onClick={()=>{setForm({who:e.who,amount:e.amount.toString(),category:e.category,nena:e.nena||"Valen",desc:e.desc||e.description,date:e.date,installments:1,isInstallment:false});setEditing(e.id);setView("form");}}
-                          style={{...btn(),background:t.surface2,color:t.accent,padding:"5px 10px",fontSize:13}}>✏️</button>}
+                        <button title="Editar gasto" onClick={()=>{setForm({who:e.who,amount:e.amount.toString(),category:e.category,nena:e.nena||"Valen",desc:e.desc||e.description,date:e.date,installments:1,isInstallment:false});setEditing(e.id);setView("form");}}
+                          style={{...btn(),background:t.surface2,color:t.accent,padding:"5px 10px",fontSize:13}}>✏️</button>
                         {e.installment_group&&e.installment_num<e.installment_total&&(
-                          <button onClick={()=>setCancelInstallConfirm({groupId:e.installment_group,fromNum:e.installment_num,total:e.installment_total,desc:form.desc||e.description?.split(" (")[0]})}
-                            style={{...btn(),background:t.surface2,color:t.warn,padding:"5px 10px",fontSize:13}}>✂️</button>
+                          <button title="Liquidar cuotas restantes en este mes" onClick={()=>{
+                            const remaining=expenses.filter(x=>x.installment_group===e.installment_group&&x.installment_num>e.installment_num&&!x.cancelled).reduce((s,x)=>s+Number(x.amount),0);
+                            setLiquidInstallConfirm({groupId:e.installment_group,fromNum:e.installment_num,total:e.installment_total,desc:e.description?.split(" (")[0],remaining});
+                          }} style={{...btn(),background:t.surface2,color:t.accent,padding:"5px 10px",fontSize:13}}>⚡</button>
                         )}
-                        <button onClick={()=>setDeleteConfirm(e.id)} style={{...btn(),background:t.surface2,color:t.danger,padding:"5px 10px",fontSize:13}}>🗑️</button>
+                        <button title="Eliminar gasto" onClick={()=>setDeleteConfirm(e.id)} style={{...btn(),background:t.surface2,color:t.danger,padding:"5px 10px",fontSize:13}}>🗑️</button>
                       </div>
                     )}
                   </div>
@@ -778,13 +793,15 @@ Reglas:
                     <div style={{fontWeight:700,fontSize:15}}>{fmt(e.amount)}</div>
                     {e.who===currentUser&&(
                       <div style={{display:"flex",gap:6,marginTop:6,justifyContent:"flex-end"}}>
-                        {!e.installment_group&&<button onClick={()=>{setForm({who:e.who,amount:e.amount.toString(),category:e.category,nena:e.nena||"Valen",desc:e.desc||e.description,date:e.date,installments:1,isInstallment:false});setEditing(e.id);setView("form");}}
-                          style={{...btn(),background:t.surface2,color:t.accent,padding:"5px 10px",fontSize:13}}>✏️</button>}
+                        <button title="Editar gasto" onClick={()=>{setForm({who:e.who,amount:e.amount.toString(),category:e.category,nena:e.nena||"Valen",desc:e.desc||e.description,date:e.date,installments:1,isInstallment:false});setEditing(e.id);setView("form");}}
+                          style={{...btn(),background:t.surface2,color:t.accent,padding:"5px 10px",fontSize:13}}>✏️</button>
                         {e.installment_group&&e.installment_num<e.installment_total&&(
-                          <button onClick={()=>setCancelInstallConfirm({groupId:e.installment_group,fromNum:e.installment_num,total:e.installment_total,desc:e.description?.split(" (")[0]})}
-                            style={{...btn(),background:t.surface2,color:t.warn,padding:"5px 10px",fontSize:13}}>✂️</button>
+                          <button title="Liquidar cuotas restantes en este mes" onClick={()=>{
+                            const remaining=expenses.filter(x=>x.installment_group===e.installment_group&&x.installment_num>e.installment_num&&!x.cancelled).reduce((s,x)=>s+Number(x.amount),0);
+                            setLiquidInstallConfirm({groupId:e.installment_group,fromNum:e.installment_num,total:e.installment_total,desc:e.description?.split(" (")[0],remaining});
+                          }} style={{...btn(),background:t.surface2,color:t.accent,padding:"5px 10px",fontSize:13}}>⚡</button>
                         )}
-                        <button onClick={()=>setDeleteConfirm(e.id)} style={{...btn(),background:t.surface2,color:t.danger,padding:"5px 10px",fontSize:13}}>🗑️</button>
+                        <button title="Eliminar gasto" onClick={()=>setDeleteConfirm(e.id)} style={{...btn(),background:t.surface2,color:t.danger,padding:"5px 10px",fontSize:13}}>🗑️</button>
                       </div>
                     )}
                   </div>
@@ -887,6 +904,51 @@ Reglas:
                 );})}
               </div>
             )}
+
+            {/* Desglose al 50% */}
+            <div style={{...card({padding:16,marginBottom:12})}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"}} onClick={()=>setShowDetail50(s=>!s)}>
+                <div style={{fontWeight:700,fontSize:15}}>📋 Desglose al 50%</div>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <span style={{fontSize:13,color:t.textMuted}}>{monthExp(filterMonth).filter(e=>!e.cancelled).length} gastos</span>
+                  <span style={{color:t.accent,fontSize:16,transition:"transform 0.2s",transform:showDetail50?"rotate(180deg)":"rotate(0deg)"}}>▼</span>
+                </div>
+              </div>
+              {showDetail50&&(
+                <div style={{marginTop:12}}>
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:t.textMuted,marginBottom:8,paddingBottom:6,borderBottom:`1px solid ${t.border}`}}>
+                    <span>Descripción</span>
+                    <div style={{display:"flex",gap:24}}>
+                      <span>Total</span>
+                      <span style={{color:t.accent,minWidth:70,textAlign:"right"}}>50% c/u</span>
+                    </div>
+                  </div>
+                  {monthExp(filterMonth).filter(e=>!e.cancelled).sort((a,b)=>b.amount-a.amount).map(e=>(
+                    <div key={e.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:`1px solid ${t.border}33`}}>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.desc||e.description}</div>
+                        <div style={{fontSize:11,color:t.textMuted,marginTop:1,display:"flex",gap:6}}>
+                          <span>{e.date}</span>
+                          <span style={{color:nenaColor(e.nena)}}>{e.nena}</span>
+                          {e.installment_group&&<span style={{color:t.accent}}>💳 {e.installment_num}/{e.installment_total}</span>}
+                        </div>
+                      </div>
+                      <div style={{display:"flex",gap:24,flexShrink:0,marginLeft:8}}>
+                        <span style={{fontSize:13,color:t.textMuted,minWidth:70,textAlign:"right"}}>{fmt(e.amount)}</span>
+                        <span style={{fontSize:13,fontWeight:700,color:t.accent,minWidth:70,textAlign:"right"}}>{fmt(Number(e.amount)/2)}</span>
+                      </div>
+                    </div>
+                  ))}
+                  <div style={{display:"flex",justifyContent:"space-between",marginTop:10,paddingTop:8,borderTop:`2px solid ${t.border}`}}>
+                    <span style={{fontWeight:700,fontSize:14}}>Total</span>
+                    <div style={{display:"flex",gap:24}}>
+                      <span style={{fontWeight:700,fontSize:14,minWidth:70,textAlign:"right"}}>{fmt(bal.total)}</span>
+                      <span style={{fontWeight:700,fontSize:14,color:t.accent,minWidth:70,textAlign:"right"}}>{fmt(bal.total/2)}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
 
             <div style={{fontWeight:700,fontSize:15,marginBottom:12}}>Por categoría</div>
             {CATEGORIES.map(cat=>{
