@@ -833,6 +833,51 @@ Reglas:
               );})}
             </div>
 
+            {/* Desglose al 50% */}
+            <div style={{...card({padding:16,marginBottom:12})}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"}} onClick={()=>setShowDetail50(s=>!s)}>
+                <div style={{fontWeight:700,fontSize:15}}>📋 Desglose al 50%</div>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <span style={{fontSize:13,color:t.textMuted}}>{monthExp(filterMonth).filter(e=>!e.cancelled).length} gastos</span>
+                  <span style={{color:t.accent,fontSize:16,transition:"transform 0.2s",transform:showDetail50?"rotate(180deg)":"rotate(0deg)"}}>▼</span>
+                </div>
+              </div>
+              {showDetail50&&(
+                <div style={{marginTop:12}}>
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:t.textMuted,marginBottom:8,paddingBottom:6,borderBottom:`1px solid ${t.border}`}}>
+                    <span>Descripción</span>
+                    <div style={{display:"flex",gap:24}}>
+                      <span>Total</span>
+                      <span style={{color:t.accent,minWidth:70,textAlign:"right"}}>50% c/u</span>
+                    </div>
+                  </div>
+                  {monthExp(filterMonth).filter(e=>!e.cancelled).sort((a,b)=>b.amount-a.amount).map(e=>(
+                    <div key={e.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:`1px solid ${t.border}33`}}>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.desc||e.description}</div>
+                        <div style={{fontSize:11,color:t.textMuted,marginTop:1,display:"flex",gap:6}}>
+                          <span>{e.date}</span>
+                          <span style={{color:nenaColor(e.nena)}}>{e.nena}</span>
+                          {e.installment_group&&<span style={{color:t.accent}}>💳 {e.installment_num}/{e.installment_total}</span>}
+                        </div>
+                      </div>
+                      <div style={{display:"flex",gap:24,flexShrink:0,marginLeft:8}}>
+                        <span style={{fontSize:13,color:t.textMuted,minWidth:70,textAlign:"right"}}>{fmt(e.amount)}</span>
+                        <span style={{fontSize:13,fontWeight:700,color:t.accent,minWidth:70,textAlign:"right"}}>{fmt(Number(e.amount)/2)}</span>
+                      </div>
+                    </div>
+                  ))}
+                  <div style={{display:"flex",justifyContent:"space-between",marginTop:10,paddingTop:8,borderTop:`2px solid ${t.border}`}}>
+                    <span style={{fontWeight:700,fontSize:14}}>Total</span>
+                    <div style={{display:"flex",gap:24}}>
+                      <span style={{fontWeight:700,fontSize:14,minWidth:70,textAlign:"right"}}>{fmt(bal.total)}</span>
+                      <span style={{fontWeight:700,fontSize:14,color:t.accent,minWidth:70,textAlign:"right"}}>{fmt(bal.total/2)}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
             <div style={{fontWeight:700,fontSize:15,marginBottom:12}}>👧 Por integrante</div>
             <div style={{display:"flex",gap:10,marginBottom:10}}>
               {[["Valen","🌟",ns.valenTotal,ns.valenCats],["Pili","💫",ns.piliTotal,ns.piliCats]].map(([n,icon,total,cats])=>(
@@ -904,51 +949,6 @@ Reglas:
                 );})}
               </div>
             )}
-
-            {/* Desglose al 50% */}
-            <div style={{...card({padding:16,marginBottom:12})}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"}} onClick={()=>setShowDetail50(s=>!s)}>
-                <div style={{fontWeight:700,fontSize:15}}>📋 Desglose al 50%</div>
-                <div style={{display:"flex",alignItems:"center",gap:8}}>
-                  <span style={{fontSize:13,color:t.textMuted}}>{monthExp(filterMonth).filter(e=>!e.cancelled).length} gastos</span>
-                  <span style={{color:t.accent,fontSize:16,transition:"transform 0.2s",transform:showDetail50?"rotate(180deg)":"rotate(0deg)"}}>▼</span>
-                </div>
-              </div>
-              {showDetail50&&(
-                <div style={{marginTop:12}}>
-                  <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:t.textMuted,marginBottom:8,paddingBottom:6,borderBottom:`1px solid ${t.border}`}}>
-                    <span>Descripción</span>
-                    <div style={{display:"flex",gap:24}}>
-                      <span>Total</span>
-                      <span style={{color:t.accent,minWidth:70,textAlign:"right"}}>50% c/u</span>
-                    </div>
-                  </div>
-                  {monthExp(filterMonth).filter(e=>!e.cancelled).sort((a,b)=>b.amount-a.amount).map(e=>(
-                    <div key={e.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:`1px solid ${t.border}33`}}>
-                      <div style={{flex:1,minWidth:0}}>
-                        <div style={{fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.desc||e.description}</div>
-                        <div style={{fontSize:11,color:t.textMuted,marginTop:1,display:"flex",gap:6}}>
-                          <span>{e.date}</span>
-                          <span style={{color:nenaColor(e.nena)}}>{e.nena}</span>
-                          {e.installment_group&&<span style={{color:t.accent}}>💳 {e.installment_num}/{e.installment_total}</span>}
-                        </div>
-                      </div>
-                      <div style={{display:"flex",gap:24,flexShrink:0,marginLeft:8}}>
-                        <span style={{fontSize:13,color:t.textMuted,minWidth:70,textAlign:"right"}}>{fmt(e.amount)}</span>
-                        <span style={{fontSize:13,fontWeight:700,color:t.accent,minWidth:70,textAlign:"right"}}>{fmt(Number(e.amount)/2)}</span>
-                      </div>
-                    </div>
-                  ))}
-                  <div style={{display:"flex",justifyContent:"space-between",marginTop:10,paddingTop:8,borderTop:`2px solid ${t.border}`}}>
-                    <span style={{fontWeight:700,fontSize:14}}>Total</span>
-                    <div style={{display:"flex",gap:24}}>
-                      <span style={{fontWeight:700,fontSize:14,minWidth:70,textAlign:"right"}}>{fmt(bal.total)}</span>
-                      <span style={{fontWeight:700,fontSize:14,color:t.accent,minWidth:70,textAlign:"right"}}>{fmt(bal.total/2)}</span>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
 
             <div style={{fontWeight:700,fontSize:15,marginBottom:12}}>Por categoría</div>
             {CATEGORIES.map(cat=>{
