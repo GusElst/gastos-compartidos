@@ -244,7 +244,7 @@ function App() {
 Reglas:
 - amount: monto TOTAL de la compra (no la cuota individual). Si dice "6 cuotas de $5000" → amount=30000.
 - installments: número de cuotas si lo dice explícitamente (ej: "6 cuotas", "cantidad de cuotas: 3", "plan 12 pagos"). Si no hay cuotas → 1.
-- has_interest: true si dice "con interés", "CFT", "TNA" o similar. false si dice "sin interés" o no menciona nada.
+- has_interest: true SOLO si el total supera el precio base × cuotas (interés financiero real). El costo de envío NO es interés. false si dice "sin interés" o no menciona nada.
 - date: fecha del comprobante en formato YYYY-MM-DD. Hoy: ${new Date().toISOString().slice(0,10)}.
 - amount: 0 si no podés leer el monto.`}]}]
         })});
